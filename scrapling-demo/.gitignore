@@ -1,0 +1,16 @@
+# Virtuelle Umgebung (nicht committen - maschinenspezifisch & gross)
+venv/
+.venv/
+
+# Echte Secrets niemals committen! (.env.example dient als Vorlage)
+.env
+
+# Python-Cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Scrapling Browser-Cache / Logs
+.scrapling/
+*.log

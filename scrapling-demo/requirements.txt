@@ -1,0 +1,3 @@
+scrapling[fetchers]
+anthropic
+python-dotenv
