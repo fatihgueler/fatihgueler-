@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-lead_finder.py — Lead-Finder: Betriebe OHNE Website finden (kostenlos)
+lead_finder.py — Lead-Finder: KMUs OHNE Website finden (kostenlos)
 
-Findet z. B. alle Gastronomen / KMUs in einer Stadt, die KEINE eigene
-Website haben – inkl. Telefon und (falls vorhanden) E-Mail. Ideal, um als
-Webentwickler genau die Betriebe zu finden, die eine Website gebrauchen
-könnten.
+Findet alle kleinen/mittleren Betriebe (KMUs) in einer Stadt ODER Region,
+die KEINE eigene Website haben – inkl. Telefon und (falls vorhanden) E-Mail.
+Ideal, um als Webentwickler genau die Betriebe zu finden, die einen neuen
+Webauftritt gebrauchen könnten.
 
 So funktioniert's:
   1. Abfrage bei OpenStreetMap über die kostenlose Overpass-API
@@ -25,7 +25,6 @@ import csv
 import sys
 import time
 from pathlib import Path
-from urllib.parse import quote
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -44,17 +43,64 @@ except ImportError:
 #  EINSTELLUNGEN  – hier anpassen
 # ─────────────────────────────────────────────────────────────────────────
 
-STADT = "Hannover"          # Name der Stadt/Gemeinde laut OpenStreetMap
-ADMIN_LEVEL = "8"           # 8 = Stadt/Gemeinde, 6 = Landkreis/Region (größer)
+# Standard: nur die Stadt Hannover (Level 8).
+# "Hannover und Umgebung"?  ->  STADT = "Region Hannover",  ADMIN_LEVEL = "6"
+STADT = "Hannover"
+ADMIN_LEVEL = "8"           # 8 = einzelne Stadt/Gemeinde, 6 = Region/Landkreis
 
-# Welche Betriebsarten suchen? (OSM-"amenity"/"shop"-Werte → Anzeigename)
-# Weitere Ideen: friseur, baeckerei, kfz → siehe KATEGORIEN_IDEEN unten.
-KATEGORIEN = {
-    "amenity=restaurant": "Restaurant",
-    "amenity=cafe": "Café",
-    "amenity=bar": "Bar",
-    "amenity=pub": "Kneipe/Pub",
-    "amenity=fast_food": "Imbiss/Fast Food",
+# Welche Betriebe suchen?  (OSM-Filter)
+#   - Eintrag OHNE "="  → BELIEBIGER Wert dieses Keys
+#       "shop"  = ALLE Läden,  "craft" = ALLE Handwerksbetriebe
+#   - Eintrag MIT "="   → genau dieser Typ
+# Diese Liste deckt typische KMUs breit ab. Einfach kürzen/ergänzen.
+OSM_FILTER = [
+    "shop",                  # alle Einzelhändler: Bäcker, Friseur, Metzger, Blumen, Optiker …
+    "craft",                 # alle Handwerksbetriebe: Tischler, Elektriker, Maler, Dachdecker …
+    "amenity=restaurant",
+    "amenity=cafe",
+    "amenity=bar",
+    "amenity=pub",
+    "amenity=fast_food",
+    "amenity=biergarten",
+    "amenity=ice_cream",
+    "amenity=pharmacy",
+    "amenity=fuel",          # Tankstellen
+    "amenity=driving_school",
+    "office=lawyer",         # Anwaltskanzlei
+    "office=tax_advisor",    # Steuerberater
+    "office=insurance",      # Versicherungsbüro
+    "office=estate_agent",   # Immobilienmakler
+    "tourism=hotel",
+    "tourism=guest_house",   # Pension
+]
+
+# Lesbare deutsche Bezeichnungen (Fallback: der rohe OSM-Wert)
+KAT_LABELS = {
+    "restaurant": "Restaurant", "cafe": "Café", "bar": "Bar", "pub": "Kneipe/Pub",
+    "fast_food": "Imbiss", "biergarten": "Biergarten", "ice_cream": "Eisdiele",
+    "pharmacy": "Apotheke", "fuel": "Tankstelle", "driving_school": "Fahrschule",
+    "hairdresser": "Friseur", "bakery": "Bäckerei", "butcher": "Metzgerei",
+    "florist": "Blumenladen", "optician": "Optiker", "kiosk": "Kiosk",
+    "supermarket": "Supermarkt", "clothes": "Bekleidung", "shoes": "Schuhe",
+    "beauty": "Kosmetik", "car_repair": "KFZ-Werkstatt", "hardware": "Eisenwaren",
+    "jewelry": "Juwelier", "confectionery": "Konditorei", "greengrocer": "Obst/Gemüse",
+    "carpenter": "Tischlerei", "electrician": "Elektriker", "painter": "Maler",
+    "plumber": "Klempner/Sanitär", "roofer": "Dachdecker", "gardener": "Gärtner",
+    "metal_construction": "Metallbau", "tiler": "Fliesenleger", "shoemaker": "Schuster",
+    "lawyer": "Anwalt", "tax_advisor": "Steuerberater", "insurance": "Versicherung",
+    "estate_agent": "Immobilienmakler", "hotel": "Hotel", "guest_house": "Pension",
+    # weitere häufige Typen
+    "tailor": "Schneiderei", "laundry": "Wäscherei", "dry_cleaning": "Reinigung",
+    "mobile_phone": "Handy-Shop", "travel_agency": "Reisebüro", "bicycle": "Fahrradladen",
+    "books": "Buchhandlung", "furniture": "Möbelgeschäft", "electronics": "Elektronik",
+    "beverages": "Getränkemarkt", "deli": "Feinkost", "doityourself": "Baumarkt",
+    "variety_store": "Kaufhaus", "second_hand": "Second-Hand", "pet": "Tierbedarf",
+    "toys": "Spielwaren", "stationery": "Schreibwaren", "sports": "Sportgeschäft",
+    "chemist": "Drogerie", "tobacco": "Tabakladen", "massage": "Massage",
+    "tattoo": "Tattoo-Studio", "photographer": "Fotograf", "locksmith": "Schlüsseldienst",
+    "shoemaker": "Schuster", "glaziery": "Glaserei", "hearing_aids": "Hörgeräte",
+    "car": "Autohaus", "car_parts": "Autoteile", "motorcycle": "Motorradhändler",
+    "hardware_store": "Eisenwaren", "gift": "Geschenkartikel", "newsagent": "Zeitschriften",
 }
 
 # Nur Leads behalten, die wenigstens eine Telefonnummer haben?
@@ -63,34 +109,27 @@ NUR_MIT_TELEFON = True
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
-# Beispiele für weitere Kategorien (zum Reinkopieren in KATEGORIEN):
-KATEGORIEN_IDEEN = {
-    "shop=hairdresser": "Friseur",
-    "shop=bakery": "Bäckerei",
-    "shop=butcher": "Metzgerei",
-    "shop=florist": "Blumenladen",
-    "craft=carpenter": "Tischlerei",
-    "amenity=pharmacy": "Apotheke",
-}
-
 
 # ─────────────────────────────────────────────────────────────────────────
 #  Overpass-Abfrage (kostenlos, ohne Key)
 # ─────────────────────────────────────────────────────────────────────────
 
+def filter_zu_klausel(f):
+    """Wandelt einen OSM-Filter in eine Overpass-Zeile um (ohne website-Tag)."""
+    # [!"website"] = "Tag fehlt" (Overpass-Negation)
+    if "=" in f:
+        key, _, value = f.partition("=")
+        bedingung = f'["{key}"="{value}"]'
+    else:
+        bedingung = f'["{f}"]'  # beliebiger Wert dieses Keys
+    return f'  nwr{bedingung}[!"website"][!"contact:website"](area.a);'
+
+
 def baue_query():
-    """Baut EINE Overpass-Abfrage für alle Kategorien ohne website-Tag."""
-    zeilen = []
-    for schluessel in KATEGORIEN:
-        key, _, value = schluessel.partition("=")
-        # Nur Einträge OHNE website und OHNE contact:website
-        # (Overpass-Negation: [!"key"] bedeutet "Tag fehlt")
-        zeilen.append(
-            f'  nwr["{key}"="{value}"][!"website"][!"contact:website"](area.a);'
-        )
-    union = "\n".join(zeilen)
+    """Baut EINE Overpass-Abfrage für alle Filter ohne website-Tag."""
+    union = "\n".join(filter_zu_klausel(f) for f in OSM_FILTER)
     return (
-        "[out:json][timeout:90];\n"
+        "[out:json][timeout:180];\n"
         f'area["name"="{STADT}"]["admin_level"="{ADMIN_LEVEL}"]'
         '["boundary"="administrative"]->.a;\n'
         f"(\n{union}\n);\n"
@@ -100,11 +139,17 @@ def baue_query():
 
 def hole_daten(query, versuche=4):
     """Ruft die Overpass-API auf – mit höflichem Backoff bei Rate-Limit (429)."""
-    url = OVERPASS_URL + "?data=" + quote(query)
     wartezeit = 3
     for versuch in range(1, versuche + 1):
         try:
-            antwort = Fetcher.get(url, stealthy_headers=True)
+            # timeout=180: große Abfragen dauern länger als die 30s-Standardvorgabe
+            antwort = Fetcher.get(
+                OVERPASS_URL,
+                params={"data": query},
+                timeout=180,
+                retries=1,
+                stealthy_headers=True,
+            )
         except Exception as e:
             print(f"   ⚠️  Netzwerkfehler (Versuch {versuch}/{versuche}): {e}")
             antwort = None
@@ -136,11 +181,11 @@ def baue_adresse(t):
 
 
 def kategorie_name(t):
-    """Ermittelt den Anzeigenamen der Kategorie aus den Tags."""
-    for schluessel, anzeige in KATEGORIEN.items():
-        key, _, value = schluessel.partition("=")
-        if t.get(key) == value:
-            return anzeige
+    """Ermittelt einen lesbaren Kategorie-Namen aus den Tags."""
+    for key in ("shop", "craft", "amenity", "office", "tourism"):
+        wert = t.get(key)
+        if wert:
+            return KAT_LABELS.get(wert, wert)  # Fallback: roher OSM-Wert
     return "Sonstiges"
 
 
@@ -179,8 +224,8 @@ def verarbeite(elemente):
             "OSM-Link": f"https://www.openstreetmap.org/{e.get('type')}/{e.get('id')}",
         })
 
-    # Alphabetisch nach Name sortieren
-    leads.sort(key=lambda d: d["Name"].lower())
+    # Nach Kategorie, dann Name sortieren – erleichtert das Abarbeiten
+    leads.sort(key=lambda d: (d["Kategorie"].lower(), d["Name"].lower()))
     return leads
 
 
@@ -191,6 +236,14 @@ def speichere_csv(leads, pfad):
         writer = csv.DictWriter(f, fieldnames=spalten)
         writer.writeheader()
         writer.writerows(leads)
+
+
+def zaehle_kategorien(leads):
+    """Zählt die Leads je Kategorie (für eine kurze Übersicht)."""
+    zaehler = {}
+    for d in leads:
+        zaehler[d["Kategorie"]] = zaehler.get(d["Kategorie"], 0) + 1
+    return sorted(zaehler.items(), key=lambda x: x[1], reverse=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -220,7 +273,7 @@ def claude_api_key():
     return key
 
 
-def priorisiere_mit_claude(api_key, leads, anzahl=25):
+def priorisiere_mit_claude(api_key, leads, anzahl=30):
     """Lässt Claude die Top-Leads priorisieren (ein einziger API-Aufruf)."""
     import anthropic
 
@@ -231,7 +284,7 @@ def priorisiere_mit_claude(api_key, leads, anzahl=25):
     )
     prompt = (
         "Du hilfst einem Freelance-Webentwickler bei der Lead-Auswahl. "
-        "Hier sind Betriebe OHNE eigene Website. Wähle die 5 aussichtsreichsten "
+        "Hier sind KMUs OHNE eigene Website. Wähle die 5 aussichtsreichsten "
         "Leads aus und begründe jeweils in einem Satz, warum sich eine Website "
         "besonders lohnen würde. Schlage außerdem einen kurzen, höflichen, "
         "DSGVO/UWG-konformen Gesprächseinstieg fürs Telefon vor. "
@@ -253,14 +306,15 @@ def priorisiere_mit_claude(api_key, leads, anzahl=25):
 # ─────────────────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 56)
-    print(f"  LEAD-FINDER — Betriebe ohne Website in {STADT}")
-    print("=" * 56)
-    print(f"\nKategorien: {', '.join(KATEGORIEN.values())}")
-    print("Quelle: OpenStreetMap / Overpass-API (kostenlos, ohne Key)\n")
+    print("=" * 58)
+    print(f"  LEAD-FINDER — KMUs ohne Website in {STADT}")
+    print("=" * 58)
+    print("\nGesucht: alle Läden, Handwerk, Gastronomie, Apotheken,")
+    print("         Hotels & lokale Dienstleister (KMUs)")
+    print("Quelle:  OpenStreetMap / Overpass-API (kostenlos, ohne Key)\n")
 
     # 1. Daten holen ------------------------------------------------------
-    print("🔎 Frage OpenStreetMap ab … (eine Abfrage, bitte kurz Geduld)")
+    print("🔎 Frage OpenStreetMap ab … (eine große Abfrage, bitte kurz Geduld)")
     try:
         elemente = hole_daten(baue_query())
     except Exception as e:
@@ -272,17 +326,17 @@ def main():
 
     if not leads:
         print("\n⚠️  Keine passenden Leads gefunden.")
-        print("    Tipp: STADT/ADMIN_LEVEL prüfen oder andere KATEGORIEN wählen.")
+        print("    Tipp: STADT/ADMIN_LEVEL prüfen oder OSM_FILTER anpassen.")
         return
 
     mit_mail = sum(1 for d in leads if d["E-Mail"])
-    print(f"\n✅ {len(leads)} Betriebe OHNE Website gefunden "
+    print(f"\n✅ {len(leads)} KMUs OHNE Website gefunden "
           f"(alle mit Telefon, {mit_mail} davon mit E-Mail).\n")
 
-    # Vorschau
-    print("   Vorschau (erste 10):")
-    for d in leads[:10]:
-        print(f"   • {d['Name']:32.32} | {d['Telefon']:18.18} | {d['Kategorie']}")
+    # Übersicht nach Kategorie
+    print("   Verteilung nach Kategorie (Top 12):")
+    for kat, n in zaehle_kategorien(leads)[:12]:
+        print(f"     {n:4}×  {kat}")
 
     # 3. CSV speichern ----------------------------------------------------
     dateiname = f"leads_{STADT.lower().replace(' ', '_')}.csv"
@@ -308,9 +362,9 @@ def main():
         print(f"❌ Fehler bei der Claude-Anfrage: {e}")
         return
 
-    print("-" * 56)
+    print("-" * 58)
     print("  CLAUDES TOP-LEAD-EMPFEHLUNGEN")
-    print("-" * 56 + "\n")
+    print("-" * 58 + "\n")
     print(analyse.strip() if analyse else "(Keine Textantwort erhalten.)")
 
 

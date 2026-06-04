@@ -108,10 +108,16 @@ gebrauchen könnten.
 python examples/lead_finder.py
 ```
 
-Beispiel-Ausgabe (Hannover, Gastronomie):
+Beispiel-Ausgabe (Stadt Hannover, alle KMUs):
 
 ```
-✅ 121 Betriebe OHNE Website gefunden (alle mit Telefon, 12 davon mit E-Mail).
+✅ 482 KMUs OHNE Website gefunden (alle mit Telefon, 43 davon mit E-Mail).
+   Verteilung nach Kategorie (Top 12):
+       56×  Friseur
+       54×  Restaurant
+       34×  Imbiss
+       23×  Bäckerei
+       ...
 💾 Gespeichert als: leads_hannover.csv
 ```
 
@@ -132,14 +138,16 @@ den Spalten: Name, Kategorie, Adresse, Telefon, E-Mail, Social, OSM-Link.
 ### Anpassen (oben in der Datei)
 
 ```python
-STADT = "Hannover"          # deine Zielstadt (Name laut OpenStreetMap)
-ADMIN_LEVEL = "8"           # 8 = Stadt/Gemeinde, 6 = Landkreis/Region (größer)
-KATEGORIEN = {              # was suchen? (OSM-Tags → Anzeigename)
-    "amenity=restaurant": "Restaurant",
-    "shop=hairdresser":   "Friseur",
-    "shop=bakery":        "Bäckerei",
-    # … weitere Ideen stehen als KATEGORIEN_IDEEN in der Datei
-}
+STADT = "Hannover"     # Zielstadt; "Hannover und Umgebung" → "Region Hannover" + ADMIN_LEVEL="6"
+ADMIN_LEVEL = "8"      # 8 = Stadt/Gemeinde, 6 = Region/Landkreis (größer)
+
+OSM_FILTER = [         # was suchen? Eintrag OHNE "=" = ALLE Werte des Keys
+    "shop",            # alle Läden (Bäcker, Friseur, Metzger, Optiker, …)
+    "craft",           # alle Handwerksbetriebe (Tischler, Elektriker, Maler, …)
+    "amenity=restaurant", "amenity=cafe", "amenity=bar",
+    "office=lawyer", "office=tax_advisor", "tourism=hotel",
+    # … volle Liste steht oben in der Datei, einfach kürzen/ergänzen
+]
 ```
 
 > 💡 **Realistische Erwartung:** OpenStreetMap hat **Telefonnummern gut** erfasst,
