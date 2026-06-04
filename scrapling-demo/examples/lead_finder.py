@@ -16,6 +16,14 @@ So funktioniert's:
      Liste von Claude priorisieren. Ohne Key wird dieser Schritt einfach
      übersprungen – das Tool funktioniert vollständig kostenlos.
 
+Aufruf:
+  python lead_finder.py                       # Standard: Stadt Hannover
+  python lead_finder.py "Region Hannover" 6   # Hannover und Umgebung
+  python lead_finder.py "Braunschweig" 8      # andere Stadt
+
+Tipp: Danach examples/lead_verify.py laufen lassen, um Betriebe auszusortieren,
+die in Wahrheit doch eine Website haben.
+
 ⚖️  Bitte vor dem Kontaktieren die rechtlichen Hinweise in der README lesen
     (DSGVO + UWG §7: Telefon-Kaltakquise im B2B nur bei mutmaßlichem
     Interesse, Kalt-E-Mails grundsätzlich nur mit Einwilligung).
@@ -40,11 +48,11 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-#  EINSTELLUNGEN  – hier anpassen
+#  EINSTELLUNGEN  – hier anpassen (oder per Kommandozeile übergeben)
 # ─────────────────────────────────────────────────────────────────────────
 
 # Standard: nur die Stadt Hannover (Level 8).
-# "Hannover und Umgebung"?  ->  STADT = "Region Hannover",  ADMIN_LEVEL = "6"
+# "Hannover und Umgebung"?  ->  python lead_finder.py "Region Hannover" 6
 STADT = "Hannover"
 ADMIN_LEVEL = "8"           # 8 = einzelne Stadt/Gemeinde, 6 = Region/Landkreis
 
@@ -52,7 +60,6 @@ ADMIN_LEVEL = "8"           # 8 = einzelne Stadt/Gemeinde, 6 = Region/Landkreis
 #   - Eintrag OHNE "="  → BELIEBIGER Wert dieses Keys
 #       "shop"  = ALLE Läden,  "craft" = ALLE Handwerksbetriebe
 #   - Eintrag MIT "="   → genau dieser Typ
-# Diese Liste deckt typische KMUs breit ab. Einfach kürzen/ergänzen.
 OSM_FILTER = [
     "shop",                  # alle Einzelhändler: Bäcker, Friseur, Metzger, Blumen, Optiker …
     "craft",                 # alle Handwerksbetriebe: Tischler, Elektriker, Maler, Dachdecker …
@@ -104,33 +111,52 @@ KAT_LABELS = {
 }
 
 # Nur Leads behalten, die wenigstens eine Telefonnummer haben?
-# (Betriebe ohne Website UND ohne Telefon kann man ohnehin nicht erreichen.)
 NUR_MIT_TELEFON = True
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
 # ─────────────────────────────────────────────────────────────────────────
-#  Overpass-Abfrage (kostenlos, ohne Key)
+#  Overpass-Abfrage (kostenlos, ohne Key) – in leichte Teilabfragen gesplittet
 # ─────────────────────────────────────────────────────────────────────────
 
-def filter_zu_klausel(f):
-    """Wandelt einen OSM-Filter in eine Overpass-Zeile um (ohne website-Tag)."""
-    # [!"website"] = "Tag fehlt" (Overpass-Negation)
-    if "=" in f:
-        key, _, value = f.partition("=")
-        bedingung = f'["{key}"="{value}"]'
-    else:
-        bedingung = f'["{f}"]'  # beliebiger Wert dieses Keys
-    return f'  nwr{bedingung}[!"website"][!"contact:website"](area.a);'
+def gruppiere_filter(filters):
+    """Teilt die Filter in mehrere kleine Abfragen auf (schont den Server).
+
+    Jeder Platzhalter-Filter (z. B. 'shop' = alle Läden) ist schwer und bekommt
+    eine eigene Abfrage; alle exakten 'key=value'-Filter werden zusammengefasst.
+    """
+    platzhalter = [f for f in filters if "=" not in f]
+    exakt = [f for f in filters if "=" in f]
+    buckets = [[p] for p in platzhalter]
+    if exakt:
+        buckets.append(exakt)
+    return buckets
 
 
-def baue_query():
-    """Baut EINE Overpass-Abfrage für alle Filter ohne website-Tag."""
-    union = "\n".join(filter_zu_klausel(f) for f in OSM_FILTER)
+def filter_label(filters):
+    """Kurzbeschreibung einer Teilabfrage für die Konsolenausgabe."""
+    if len(filters) == 1 and "=" not in filters[0]:
+        return {"shop": "alle Läden", "craft": "alle Handwerksbetriebe"}.get(
+            filters[0], f"alle {filters[0]}")
+    return "Gastronomie & Dienstleister"
+
+
+def baue_query(filters, stadt, level):
+    """Baut EINE Overpass-Abfrage für die gegebenen Filter ohne website-Tag."""
+    zeilen = []
+    for f in filters:
+        if "=" in f:
+            key, _, value = f.partition("=")
+            bedingung = f'["{key}"="{value}"]'
+        else:
+            bedingung = f'["{f}"]'
+        # [!"website"] = "Tag fehlt" (Overpass-Negation)
+        zeilen.append(f'  nwr{bedingung}[!"website"][!"contact:website"](area.a);')
+    union = "\n".join(zeilen)
     return (
         "[out:json][timeout:180];\n"
-        f'area["name"="{STADT}"]["admin_level"="{ADMIN_LEVEL}"]'
+        f'area["name"="{stadt}"]["admin_level"="{level}"]'
         '["boundary"="administrative"]->.a;\n'
         f"(\n{union}\n);\n"
         "out center tags;"
@@ -167,6 +193,23 @@ def hole_daten(query, versuche=4):
             wartezeit *= 2  # 3 → 6 → 12 …
 
     raise RuntimeError("Overpass-API war nach mehreren Versuchen nicht erreichbar.")
+
+
+def hole_alle(stadt, level):
+    """Führt alle Teilabfragen aus und führt die Elemente zusammen (dedupliziert)."""
+    buckets = gruppiere_filter(OSM_FILTER)
+    elemente = []
+    gesehen = set()
+    for i, bucket in enumerate(buckets, start=1):
+        print(f"   • Teil {i}/{len(buckets)}: {filter_label(bucket)} …")
+        for e in hole_daten(baue_query(bucket, stadt, level)):
+            schluessel = (e.get("type"), e.get("id"))
+            if schluessel not in gesehen:
+                gesehen.add(schluessel)
+                elemente.append(e)
+        if i < len(buckets):
+            time.sleep(2)  # höfliche Pause zwischen den Teilabfragen
+    return elemente
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -224,7 +267,6 @@ def verarbeite(elemente):
             "OSM-Link": f"https://www.openstreetmap.org/{e.get('type')}/{e.get('id')}",
         })
 
-    # Nach Kategorie, dann Name sortieren – erleichtert das Abarbeiten
     leads.sort(key=lambda d: (d["Kategorie"].lower(), d["Name"].lower()))
     return leads
 
@@ -260,7 +302,7 @@ def claude_api_key():
     try:
         from dotenv import load_dotenv
     except ImportError:
-        return None  # ohne python-dotenv einfach den Claude-Schritt überspringen
+        return None
 
     import os
     env_pfad = Path(__file__).resolve().parent.parent / ".env"
@@ -306,17 +348,21 @@ def priorisiere_mit_claude(api_key, leads, anzahl=30):
 # ─────────────────────────────────────────────────────────────────────────
 
 def main():
+    # Stadt/Level optional per Kommandozeile übergeben
+    stadt = sys.argv[1] if len(sys.argv) > 1 else STADT
+    level = sys.argv[2] if len(sys.argv) > 2 else ADMIN_LEVEL
+
     print("=" * 58)
-    print(f"  LEAD-FINDER — KMUs ohne Website in {STADT}")
+    print(f"  LEAD-FINDER — KMUs ohne Website in {stadt}")
     print("=" * 58)
     print("\nGesucht: alle Läden, Handwerk, Gastronomie, Apotheken,")
     print("         Hotels & lokale Dienstleister (KMUs)")
     print("Quelle:  OpenStreetMap / Overpass-API (kostenlos, ohne Key)\n")
 
-    # 1. Daten holen ------------------------------------------------------
-    print("🔎 Frage OpenStreetMap ab … (eine große Abfrage, bitte kurz Geduld)")
+    # 1. Daten holen (mehrere Teilabfragen) -------------------------------
+    print("🔎 Frage OpenStreetMap ab (in mehreren Teilen, bitte Geduld) …")
     try:
-        elemente = hole_daten(baue_query())
+        elemente = hole_alle(stadt, level)
     except Exception as e:
         print(f"❌ {e}")
         return
@@ -326,30 +372,30 @@ def main():
 
     if not leads:
         print("\n⚠️  Keine passenden Leads gefunden.")
-        print("    Tipp: STADT/ADMIN_LEVEL prüfen oder OSM_FILTER anpassen.")
+        print('    Tipp: Stadt/Level prüfen, z. B.  python lead_finder.py "Region Hannover" 6')
         return
 
     mit_mail = sum(1 for d in leads if d["E-Mail"])
     print(f"\n✅ {len(leads)} KMUs OHNE Website gefunden "
           f"(alle mit Telefon, {mit_mail} davon mit E-Mail).\n")
 
-    # Übersicht nach Kategorie
     print("   Verteilung nach Kategorie (Top 12):")
     for kat, n in zaehle_kategorien(leads)[:12]:
         print(f"     {n:4}×  {kat}")
 
     # 3. CSV speichern ----------------------------------------------------
-    dateiname = f"leads_{STADT.lower().replace(' ', '_')}.csv"
+    dateiname = f"leads_{stadt.lower().replace(' ', '_')}.csv"
     pfad = Path(__file__).resolve().parent.parent / dateiname
     speichere_csv(leads, pfad)
     print(f"\n💾 Gespeichert als: {pfad}")
+    print("   Tipp: Fehltreffer aussortieren mit  python examples/lead_verify.py "
+          f"{dateiname}")
 
     # 4. OPTIONAL: Claude-Priorisierung ----------------------------------
     api_key = claude_api_key()
     if not api_key:
         print("\nℹ️  Optionaler Claude-Schritt übersprungen (kein API-Key gesetzt).")
         print("    Das Tool ist damit fertig – komplett kostenlos. 🎉")
-        print("    Für eine KI-Priorisierung: API-Key in .env eintragen.")
         return
 
     print("\n🤖 Claude priorisiert die Top-Leads … (ein API-Aufruf)\n")

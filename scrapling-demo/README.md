@@ -105,7 +105,8 @@ Webentwickler genau die Betriebe zu finden, die einen neuen Webauftritt
 gebrauchen könnten.
 
 ```bash
-python examples/lead_finder.py
+python examples/lead_finder.py                      # nur Stadt Hannover
+python examples/lead_finder.py "Region Hannover" 6  # Hannover und Umgebung
 ```
 
 Beispiel-Ausgabe (Stadt Hannover, alle KMUs):
