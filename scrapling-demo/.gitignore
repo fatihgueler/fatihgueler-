@@ -14,3 +14,6 @@ __pycache__/
 # Scrapling Browser-Cache / Logs
 .scrapling/
 *.log
+
+# Generierte Lead-Listen NICHT committen (enthalten Kontaktdaten → DSGVO!)
+leads_*.csv

@@ -96,6 +96,77 @@ python examples/claude_analyze.py   # Scrapling + Claude (braucht API-Key)
 
 ---
 
+## ⭐ Lead-Finder: Betriebe ohne Website finden (kostenlos)
+
+`examples/lead_finder.py` ist das praxisnahe Highlight: Es findet z. B. alle
+**Gastronomen oder KMUs in einer Stadt, die noch keine eigene Website haben** –
+inklusive **Telefonnummer** und (falls vorhanden) **E-Mail**. Perfekt, um als
+Webentwickler genau die Betriebe zu finden, die einen neuen Webauftritt
+gebrauchen könnten.
+
+```bash
+python examples/lead_finder.py
+```
+
+Beispiel-Ausgabe (Hannover, Gastronomie):
+
+```
+✅ 121 Betriebe OHNE Website gefunden (alle mit Telefon, 12 davon mit E-Mail).
+💾 Gespeichert als: leads_hannover.csv
+```
+
+Die Ergebnisse landen in einer **CSV-Datei** (öffnet sich direkt in Excel) mit
+den Spalten: Name, Kategorie, Adresse, Telefon, E-Mail, Social, OSM-Link.
+
+### Wie funktioniert das – und warum kostenlos?
+
+- **Datenquelle: OpenStreetMap** über die **Overpass-API** – offene Daten
+  (ODbL-Lizenz), **kein API-Key, keine Kosten**. Jeder Eintrag hat strukturierte
+  Tags wie `phone`, `email`, `website`. So lässt sich direkt filtern:
+  *„alle Restaurants ohne `website`-Tag"*.
+- **Claude ist optional:** Ist ein `ANTHROPIC_API_KEY` gesetzt, priorisiert
+  Claude die vielversprechendsten Leads und schlägt einen rechtssicheren
+  Telefon-Einstieg vor. Ohne Key wird dieser Schritt einfach übersprungen –
+  **der Lead-Finder läuft vollständig gratis.**
+
+### Anpassen (oben in der Datei)
+
+```python
+STADT = "Hannover"          # deine Zielstadt (Name laut OpenStreetMap)
+ADMIN_LEVEL = "8"           # 8 = Stadt/Gemeinde, 6 = Landkreis/Region (größer)
+KATEGORIEN = {              # was suchen? (OSM-Tags → Anzeigename)
+    "amenity=restaurant": "Restaurant",
+    "shop=hairdresser":   "Friseur",
+    "shop=bakery":        "Bäckerei",
+    # … weitere Ideen stehen als KATEGORIEN_IDEEN in der Datei
+}
+```
+
+> 💡 **Realistische Erwartung:** OpenStreetMap hat **Telefonnummern gut** erfasst,
+> **E-Mails nur selten** (gerade Betriebe ohne Website hinterlegen kaum eine
+> Mail). Für genau diese Betriebe ist das **Telefon der realistische Kanal** –
+> was rechtlich ohnehin günstiger ist (siehe unten).
+
+### ⚖️ Rechtliches zur Lead-Nutzung (Deutschland)
+
+Das Sammeln öffentlich verfügbarer **Geschäfts**daten zur B2B-Akquise ist
+grundsätzlich zulässig (berechtigtes Interesse, Art. 6 Abs. 1 f DSGVO). Beim
+**Kontaktieren** gilt aber **UWG § 7**:
+
+- 📞 **Telefon (B2B):** nur bei *mutmaßlichem Interesse* erlaubt. Bei einem
+  Webdesign-Angebot an einen Betrieb ohne Website oft vertretbar – aber kein
+  Freifahrtschein.
+- ✉️ **Kalt-E-Mail / Fax:** grundsätzlich **nur mit vorheriger Einwilligung** –
+  Werbe-Mails an Betriebe ohne Einwilligung sind i. d. R. unzulässig (Abmahngefahr).
+- 📬 **Brief/Post:** rechtlich am unkritischsten.
+- Bei **Einzelunternehmern** sind Telefon/E-Mail personenbezogene Daten →
+  sparsam speichern, Widersprüche respektieren.
+
+Im Zweifel anwaltlich beraten lassen. Dieses Tool stellt **keine Rechtsberatung**
+dar.
+
+---
+
 ## 📂 Projektstruktur
 
 ```
@@ -108,7 +179,8 @@ scrapling-demo/
 └── examples/
     ├── basic_fetch.py    # Titel + Preise von books.toscrape.com
     ├── stealth_fetch.py  # StealthyFetcher + einzelner CSS-Selektor
-    └── claude_analyze.py # HN-Titel scrapen → von Claude analysieren lassen
+    ├── claude_analyze.py # HN-Titel scrapen → von Claude analysieren lassen
+    └── lead_finder.py    # ⭐ Betriebe OHNE Website finden (Leads, kostenlos)
 ```
 
 ---
