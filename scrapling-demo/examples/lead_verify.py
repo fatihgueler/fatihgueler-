@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 """
-lead_verify.py — Fehltreffer aus einer Lead-Liste herausfiltern
+lead_verify.py — Fehltreffer aus einer Lead-Liste herausfiltern (wiederaufsetzbar)
 
 Problem: „Kein website-Tag in OpenStreetMap" heißt nicht zu 100 %, dass der
 Betrieb wirklich keine Website hat – OSM ist manchmal nur unvollständig.
 
-Dieses Tool prüft jeden Lead per Websuche (DuckDuckGo) nach und sortiert
-Betriebe aus, die in Wahrheit doch eine eigene Website haben:
+Dieses Tool prüft jeden Lead per Websuche (DuckDuckGo, kostenlos) nach und
+sortiert Betriebe aus, die in Wahrheit doch eine eigene Website haben.
 
-  1. Liest die von lead_finder.py erzeugte CSV ein
-  2. Sucht pro Lead im Web nach "<Name> <Ort>"
-  3. Klassifiziert die Treffer-Domains:
-       - Verzeichnis/Portal/Social (dasoertliche, facebook, lieferando …) → ignorieren
-       - echte eigene Domain (Name taucht in der Domain auf)             → Website!
-  4. Schreibt zwei Dateien:
-       - leads_..._verifiziert.csv   → bestätigt OHNE Website (deine Leads)
-       - leads_..._mit_website.csv   → aussortiert (hatten doch eine Website)
+WICHTIG: Es ist WIEDERAUFSETZBAR. Jeder geprüfte Lead wird in einer
+Fortschritts-Datei (…_geprueft.csv) festgehalten. Startest du das Tool erneut,
+macht es genau dort weiter, wo es aufgehört hat. So lässt sich auch eine große
+Liste (z. B. 1000+ Leads) bequem in Etappen abarbeiten, ohne DuckDuckGo zu
+überlasten.
 
-Läuft komplett KOSTENLOS (DuckDuckGo, kein Key). Claude ist optional.
+Erzeugte Dateien (Basis = Name der Eingabe-CSV):
+  …_geprueft.csv     → ALLE Leads inkl. Prüf-Status (= Fortschritt, dient dem Resume)
+  …_verifiziert.csv  → bestätigt OHNE Website (deine bereinigten Leads)
+  …_mit_website.csv  → aussortiert (hatten doch eine Website)
+
+Aufruf:
+  python lead_verify.py                              # prüft leads_hannover.csv (alle offenen)
+  python lead_verify.py leads_region_hannover.csv    # andere Liste
+  python lead_verify.py leads_region_hannover.csv 100  # nur die nächsten 100 prüfen
+
+Läuft komplett KOSTENLOS (DuckDuckGo, kein Key).
 
 ⚠️  Heuristik, kein Orakel: gelegentliche Fehlentscheidungen sind möglich.
     Im Zweifel wird ein Lead BEHALTEN (lieber prüfen als verlieren).
@@ -49,10 +56,17 @@ except ImportError:
 #  EINSTELLUNGEN
 # ─────────────────────────────────────────────────────────────────────────
 
-EINGABE_CSV = "leads_hannover.csv"   # oder als Argument:  python lead_verify.py meine.csv
-LIMIT = 25                            # wie viele Leads prüfen? 0 = alle
-PAUSE_SEK = (1.5, 3.0)                # höfliche Zufallspause zwischen Suchen
-STADT_FALLBACK = "Hannover"           # falls in der Adresse kein Ort steht
+EINGABE_CSV = "leads_hannover.csv"   # oder als 1. Argument übergeben
+# Wie viele OFFENE Leads pro Lauf prüfen?  0 = alle (mit automatischen Pausen)
+LIMIT = 0
+STADT_FALLBACK = "Hannover"
+
+PAUSE_SEK = (2.0, 4.0)        # Zufallspause zwischen einzelnen Suchen
+COOLDOWN_NACH = 40            # nach so vielen Suchen eine längere Pause einlegen
+COOLDOWN_SEK = 45            # Dauer dieser regelmäßigen Pause
+MAX_FEHLER_AM_STUECK = 5      # so viele Fehler in Folge → DuckDuckGo blockt evtl.
+ZWANGSPAUSE_SEK = 120        # dann diese Zwangspause einlegen
+SPEICHERN_ALLE = 15          # Fortschritt alle N Leads zwischenspeichern
 
 # Domains, die KEINE eigene Firmenwebsite sind (Verzeichnisse, Portale, Social)
 VERZEICHNIS_MARKER = [
@@ -70,6 +84,10 @@ VERZEICHNIS_MARKER = [
     "telefonbuch", "kaufda", "firmeneintrag", "adressen.", "stadtportal",
 ]
 
+# Prüf-Status → Text in der CSV
+TEXT_KEINE = "keine eigene Website gefunden"
+TEXT_OFFEN = "ungeprüft (Suche fehlgeschlagen)"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 #  Text-Normalisierung & Namensabgleich
@@ -84,20 +102,17 @@ NAME_STOPWORDS = {
 
 
 def normalisieren(s):
-    """Kleinbuchstaben, Umlaute ersetzen, Akzente entfernen."""
     s = s.lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
     s = unicodedata.normalize("NFKD", s)
     return "".join(c for c in s if not unicodedata.combining(c))
 
 
 def name_tokens(name):
-    """Aussagekräftige Wörter aus dem Betriebsnamen (≥4 Zeichen, ohne Füllwörter)."""
     toks = re.split(r"[^a-z0-9]+", normalisieren(name))
     return {t for t in toks if len(t) >= 4 and t not in NAME_STOPWORDS}
 
 
 def domain_kern_tokens(host):
-    """Wörter aus dem Domain-Kern (z. B. 'friseur-mueller.de' → {friseur, mueller})."""
     teile = host.split(".")
     kern = teile[-2] if len(teile) >= 2 else teile[0]
     toks = re.split(r"[^a-z0-9]+", normalisieren(kern))
@@ -109,7 +124,6 @@ def ist_verzeichnis(host):
 
 
 def ort_aus_adresse(adresse):
-    """Holt den Ort aus 'Straße 1, 30419 Hannover' → 'Hannover'."""
     if adresse and "," in adresse:
         tail = adresse.split(",")[-1].strip()
         ort = " ".join(t for t in tail.split() if not t.isdigit())
@@ -123,7 +137,7 @@ def ort_aus_adresse(adresse):
 # ─────────────────────────────────────────────────────────────────────────
 
 def suche_domains(query, max_treffer=8):
-    """Sucht bei DuckDuckGo und gibt die Treffer-Hostnamen zurück (oder None bei Fehler)."""
+    """Sucht bei DuckDuckGo; gibt Treffer-Hostnamen zurück (oder None bei Fehler)."""
     url = "https://html.duckduckgo.com/html/?q=" + quote(query)
     try:
         r = Fetcher.get(url, timeout=25, retries=1, stealthy_headers=True)
@@ -146,22 +160,60 @@ def suche_domains(query, max_treffer=8):
 
 
 def pruefe_lead(lead):
-    """Bewertet einen Lead: ('keine_website'|'hat_website'|'ungeprueft', domain)."""
+    """Bewertet einen Lead → (status, domain). status: keine|hat|offen."""
     ort = ort_aus_adresse(lead.get("Adresse", ""))
     domains = suche_domains(f"{lead['Name']} {ort}")
 
     if domains is None:
-        return ("ungeprueft", "")  # Suche fehlgeschlagen → Lead behalten
+        return ("offen", "")  # Suche fehlgeschlagen → später erneut versuchen
 
     nt = name_tokens(lead["Name"])
     for host in domains:
         if ist_verzeichnis(host):
             continue
-        # Echte eigene Website? → Name taucht im Domain-Kern auf
-        if nt & domain_kern_tokens(host):
-            return ("hat_website", host)
+        if nt & domain_kern_tokens(host):  # Name taucht in der Domain auf
+            return ("hat", host)
+    return ("keine", "")
 
-    return ("keine_website", "")
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Fortschritt laden / speichern (Resume)
+# ─────────────────────────────────────────────────────────────────────────
+
+SPALTEN = ["Name", "Kategorie", "Adresse", "Telefon", "E-Mail", "Social", "OSM-Link", "Prüfung"]
+
+
+def lade_ledger(pfad):
+    """Lädt bisherigen Fortschritt: OSM-Link → Prüf-Text."""
+    if not pfad.exists():
+        return {}
+    with open(pfad, encoding="utf-8-sig", newline="") as f:
+        return {r["OSM-Link"]: r.get("Prüfung", "") for r in csv.DictReader(f)}
+
+
+def ist_erledigt(pruef_text):
+    """Erledigt = entschieden (keine Website / hat Website). 'ungeprüft' bleibt offen."""
+    return bool(pruef_text) and not pruef_text.startswith("ungeprüft")
+
+
+def schreibe(pfad, rows):
+    with open(pfad, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=SPALTEN, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
+def speichere_alle(basis_pfad, alle_leads, status):
+    """Schreibt Ledger + verifizierte + aussortierte Liste."""
+    for lead in alle_leads:
+        lead["Prüfung"] = status.get(lead["OSM-Link"], "")
+
+    schreibe(basis_pfad.with_name(basis_pfad.stem + "_geprueft.csv"), alle_leads)
+    schreibe(basis_pfad.with_name(basis_pfad.stem + "_verifiziert.csv"),
+             [l for l in alle_leads if status.get(l["OSM-Link"]) == TEXT_KEINE])
+    aussortiert = [l for l in alle_leads if (status.get(l["OSM-Link"]) or "").startswith("hat Website")]
+    if aussortiert:
+        schreibe(basis_pfad.with_name(basis_pfad.stem + "_mit_website.csv"), aussortiert)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -170,77 +222,100 @@ def pruefe_lead(lead):
 
 def main():
     eingabe = sys.argv[1] if len(sys.argv) > 1 else EINGABE_CSV
-    pfad = Path(__file__).resolve().parent.parent / eingabe
-    if not pfad.exists():
-        print(f"❌ Eingabedatei nicht gefunden: {pfad}")
+    limit = int(sys.argv[2]) if len(sys.argv) > 2 else LIMIT
+
+    basis_pfad = Path(__file__).resolve().parent.parent / eingabe
+    if not basis_pfad.exists():
+        print(f"❌ Eingabedatei nicht gefunden: {basis_pfad}")
         print("   Erst lead_finder.py laufen lassen oder CSV als Argument angeben.")
         return
 
-    with open(pfad, encoding="utf-8-sig", newline="") as f:
-        leads = list(csv.DictReader(f))
-
-    if not leads:
+    with open(basis_pfad, encoding="utf-8-sig", newline="") as f:
+        alle_leads = list(csv.DictReader(f))
+    if not alle_leads:
         print("⚠️  Die CSV enthält keine Leads.")
         return
 
-    gesamt = len(leads)
-    zu_pruefen = leads if LIMIT in (0, None) else leads[:LIMIT]
+    # Bisherigen Fortschritt laden (Resume)
+    ledger_pfad = basis_pfad.with_name(basis_pfad.stem + "_geprueft.csv")
+    status = lade_ledger(ledger_pfad)
+
+    offen = [l for l in alle_leads if not ist_erledigt(status.get(l["OSM-Link"], ""))]
+    erledigt_vorher = len(alle_leads) - len(offen)
+
+    if limit and limit > 0:
+        offen = offen[:limit]
 
     print("=" * 60)
     print("  LEAD-VERIFIZIERUNG — Fehltreffer aussortieren")
     print("=" * 60)
-    print(f"\nDatei: {eingabe}  ({gesamt} Leads, prüfe {len(zu_pruefen)})")
-    print("Quelle: DuckDuckGo (kostenlos). Bitte etwas Geduld …\n")
+    print(f"\nDatei: {eingabe}  ({len(alle_leads)} Leads gesamt)")
+    print(f"Bereits erledigt: {erledigt_vorher}  |  Jetzt zu prüfen: {len(offen)}")
+    if not offen:
+        print("\n✅ Nichts mehr offen – alle Leads sind bereits geprüft.")
+        speichere_alle(basis_pfad, alle_leads, status)
+        return
+    print("Quelle: DuckDuckGo (kostenlos). Mit Cool-down-Pausen, bitte Geduld …\n")
 
-    behalten, aussortiert, ungeprueft = [], [], 0
+    fehler_serie = 0
+    seit_speichern = 0
 
-    for i, lead in enumerate(zu_pruefen, start=1):
-        status, domain = pruefe_lead(lead)
+    for i, lead in enumerate(offen, start=1):
+        s, domain = pruefe_lead(lead)
 
-        if status == "hat_website":
-            lead["Prüfung"] = f"hat Website: {domain}"
-            aussortiert.append(lead)
+        if s == "hat":
+            status[lead["OSM-Link"]] = f"hat Website: {domain}"
             symbol = f"✗ hat Website ({domain})"
-        elif status == "ungeprueft":
-            lead["Prüfung"] = "ungeprüft (Suche fehlgeschlagen)"
-            behalten.append(lead)
-            ungeprueft += 1
-            symbol = "? ungeprüft"
-        else:
-            lead["Prüfung"] = "keine eigene Website gefunden"
-            behalten.append(lead)
+            fehler_serie = 0
+        elif s == "keine":
+            status[lead["OSM-Link"]] = TEXT_KEINE
             symbol = "✓ keine Website"
+            fehler_serie = 0
+        else:  # offen / Fehler
+            status[lead["OSM-Link"]] = TEXT_OFFEN
+            symbol = "? ungeprüft (Suche fehlgeschlagen)"
+            fehler_serie += 1
 
-        print(f"  [{i:3}/{len(zu_pruefen)}] {lead['Name'][:34]:34} → {symbol}")
+        print(f"  [{i:4}/{len(offen)}] {lead['Name'][:32]:32} → {symbol}")
 
-        if i < len(zu_pruefen):
-            time.sleep(random.uniform(*PAUSE_SEK))  # höflich bleiben
+        # Fortschritt regelmäßig sichern (gegen Abbruch)
+        seit_speichern += 1
+        if seit_speichern >= SPEICHERN_ALLE:
+            speichere_alle(basis_pfad, alle_leads, status)
+            seit_speichern = 0
 
-    # Ergebnisse speichern -----------------------------------------------
-    basis = eingabe.rsplit(".", 1)[0]
-    spalten = ["Name", "Kategorie", "Adresse", "Telefon", "E-Mail", "Social", "OSM-Link", "Prüfung"]
+        # DuckDuckGo blockt? → längere Zwangspause
+        if fehler_serie >= MAX_FEHLER_AM_STUECK:
+            print(f"   ⏳ Mehrere Fehler in Folge – {ZWANGSPAUSE_SEK}s Zwangspause (DuckDuckGo schont sich) …")
+            speichere_alle(basis_pfad, alle_leads, status)
+            time.sleep(ZWANGSPAUSE_SEK)
+            fehler_serie = 0
 
-    def schreibe(name, rows):
-        ziel = Path(__file__).resolve().parent.parent / name
-        with open(ziel, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=spalten, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows)
-        return ziel
+        if i < len(offen):
+            # regelmäßiger Cool-down + normale Zufallspause
+            if i % COOLDOWN_NACH == 0:
+                print(f"   ⏳ Cool-down nach {COOLDOWN_NACH} Suchen ({COOLDOWN_SEK}s) …")
+                time.sleep(COOLDOWN_SEK)
+            else:
+                time.sleep(random.uniform(*PAUSE_SEK))
 
-    ziel_ok = schreibe(f"{basis}_verifiziert.csv", behalten)
-    if aussortiert:
-        schreibe(f"{basis}_mit_website.csv", aussortiert)
+    # Abschluss
+    speichere_alle(basis_pfad, alle_leads, status)
 
-    # Zusammenfassung -----------------------------------------------------
+    keine = sum(1 for l in alle_leads if status.get(l["OSM-Link"]) == TEXT_KEINE)
+    hat = sum(1 for l in alle_leads if (status.get(l["OSM-Link"]) or "").startswith("hat Website"))
+    rest_offen = sum(1 for l in alle_leads if not ist_erledigt(status.get(l["OSM-Link"], "")))
+
     print("\n" + "-" * 60)
-    print(f"  Geprüft:     {len(zu_pruefen)}")
-    print(f"  ✓ Behalten:  {len(behalten)}  (ohne Website – davon {ungeprueft} ungeprüft)")
-    print(f"  ✗ Aussortiert: {len(aussortiert)}  (hatten doch eine Website)")
+    print(f"  ✓ Bestätigt OHNE Website: {keine}")
+    print(f"  ✗ Aussortiert (hatten Website): {hat}")
+    print(f"  ? Noch offen (erneut starten zum Fortsetzen): {rest_offen}")
     print("-" * 60)
-    print(f"\n💾 Bereinigte Lead-Liste: {ziel_ok}")
-    if aussortiert:
-        print(f"💾 Aussortierte (zur Kontrolle): {basis}_mit_website.csv")
+    print(f"\n💾 Bereinigte Leads: {basis_pfad.stem}_verifiziert.csv")
+    print(f"💾 Fortschritt:      {basis_pfad.stem}_geprueft.csv")
+    if rest_offen:
+        print(f"\nℹ️  Noch {rest_offen} offen. Einfach erneut starten – es macht dort weiter:")
+        print(f"    python examples/lead_verify.py {eingabe}")
 
 
 if __name__ == "__main__":
