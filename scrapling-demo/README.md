@@ -155,6 +155,27 @@ OSM_FILTER = [         # was suchen? Eintrag OHNE "=" = ALLE Werte des Keys
 > Mail). Für genau diese Betriebe ist das **Telefon der realistische Kanal** –
 > was rechtlich ohnehin günstiger ist (siehe unten).
 
+### 🔍 Schritt 2 (optional): Fehltreffer rausfiltern
+
+OSM ist manchmal unvollständig – manche „ohne Website"-Betriebe haben in
+Wirklichkeit doch eine. `examples/lead_verify.py` prüft das per Websuche nach:
+
+```bash
+python examples/lead_verify.py            # prüft leads_hannover.csv
+python examples/lead_verify.py meine.csv  # oder eine andere Liste
+```
+
+- Sucht pro Lead bei **DuckDuckGo (kostenlos, kein Key)** und erkennt an den
+  Treffer-Domains, ob eine echte eigene Website existiert. Verzeichnisse/Portale
+  (dasoertliche, lieferando, facebook …) werden ignoriert.
+- Schreibt `leads_..._verifiziert.csv` (bereinigte Leads) und
+  `leads_..._mit_website.csv` (aussortierte – zur Kontrolle).
+- Menge per `LIMIT` einstellbar (Standard 25 zum Testen; `0` = alle).
+
+> Heuristik, kein Orakel – im Zweifel **bleibt** ein Lead drin. Für große Mengen
+> DuckDuckGo nicht überlasten: in Etappen laufen lassen (`LIMIT`) oder für hohe
+> Volumina eine Such-API (z. B. Brave Search) nutzen.
+
 ### ⚖️ Rechtliches zur Lead-Nutzung (Deutschland)
 
 Das Sammeln öffentlich verfügbarer **Geschäfts**daten zur B2B-Akquise ist
@@ -188,7 +209,8 @@ scrapling-demo/
     ├── basic_fetch.py    # Titel + Preise von books.toscrape.com
     ├── stealth_fetch.py  # StealthyFetcher + einzelner CSS-Selektor
     ├── claude_analyze.py # HN-Titel scrapen → von Claude analysieren lassen
-    └── lead_finder.py    # ⭐ Betriebe OHNE Website finden (Leads, kostenlos)
+    ├── lead_finder.py    # ⭐ Betriebe OHNE Website finden (Leads, kostenlos)
+    └── lead_verify.py    # 🔍 Fehltreffer rausfiltern (Websuche, kostenlos)
 ```
 
 ---
