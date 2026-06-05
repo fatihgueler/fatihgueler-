@@ -8,11 +8,59 @@
 
 body {
   @apply bg-slate-950 text-slate-100 antialiased;
+  background-image:
+    radial-gradient(60rem 60rem at 10% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(50rem 50rem at 100% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(40rem 40rem at 50% 120%, rgba(139, 92, 246, 0.16), transparent 60%);
+  background-attachment: fixed;
 }
 
-/* Leaflet-Karte soll den Container füllen */
+@layer components {
+  .glass {
+    @apply border border-white/10 bg-white/5 backdrop-blur-xl;
+  }
+  .glass-strong {
+    @apply border border-white/10 bg-slate-900/60 backdrop-blur-xl;
+  }
+  .text-gradient {
+    @apply bg-gradient-to-r from-indigo-400 via-violet-400 to-emerald-400 bg-clip-text text-transparent;
+  }
+  .btn-primary {
+    @apply rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition hover:shadow-indigo-500/40 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}
+
+/* Leaflet-Karte füllt ihren Container, dunkles Theme */
 .leaflet-container {
   height: 100%;
   width: 100%;
   background: #0f172a;
+  font-family: inherit;
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #fff;
+  color: #0f172a;
+}
+
+/* Dezenter, moderner Scrollbalken */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

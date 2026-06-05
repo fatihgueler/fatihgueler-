@@ -6,14 +6,20 @@ import SearchForm from "@/components/SearchForm";
 import ProgressBar from "@/components/ProgressBar";
 import StatCard from "@/components/StatCard";
 import ResultsTable from "@/components/ResultsTable";
+import SavedSearches from "@/components/SavedSearches";
 import { Lead, SearchParams } from "@/lib/types";
 import { exportUrl, getJob, startSearch, startVerify, streamUrl } from "@/lib/api";
+import { loadSearches, removeSearch, saveSearch, SavedSearch } from "@/lib/storage";
 
-const LeadMap = dynamic(() => import("@/components/LeadMap"), {
+const Globe = dynamic(() => import("@/components/Globe"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full items-center justify-center text-slate-500">Karte lädt …</div>
+    <div className="mx-auto aspect-square w-full max-w-[420px] animate-pulse rounded-full bg-indigo-500/10" />
   ),
+});
+const LeadMap = dynamic(() => import("@/components/LeadMap"), {
+  ssr: false,
+  loading: () => <div className="flex h-full items-center justify-center text-slate-500">Karte lädt …</div>,
 });
 
 type Status = "idle" | "running" | "done" | "error";
@@ -28,7 +34,18 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [onlyNoWeb, setOnlyNoWeb] = useState(false);
+  const [saved, setSaved] = useState<SavedSearch[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => setSaved(loadSearches()), []);
+
+  const stopPoll = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
 
   const listen = useCallback((id: string, onDone: () => void) => {
     esRef.current?.close();
@@ -57,13 +74,15 @@ export default function Home() {
   }, []);
 
   const handleSearch = useCallback(
-    async (p: SearchParams) => {
+    async (p: SearchParams, label: string) => {
       setError(null);
       setLeads([]);
       setStats({});
+      setVerifying(false);
       setStatus("running");
       setPhase("Starte …");
       setProg({ current: 0, total: 0 });
+      document.getElementById("ergebnisse")?.scrollIntoView({ behavior: "smooth" });
       try {
         const id = await startSearch(p);
         setJobId(id);
@@ -73,6 +92,7 @@ export default function Home() {
           setStats(job.stats);
           setPhase(job.phase);
           setStatus("done");
+          setSaved(saveSearch({ ...p, label, ts: Date.now(), count: job.leads.length }));
         });
       } catch (e) {
         setStatus("error");
@@ -90,7 +110,17 @@ export default function Home() {
     setStats({});
     try {
       await startVerify(jobId);
+      stopPoll();
+      pollRef.current = setInterval(async () => {
+        try {
+          const job = await getJob(jobId);
+          setLeads([...job.leads]); // Badges + Karte live aktualisieren
+        } catch {
+          /* ignore */
+        }
+      }, 2500);
       listen(jobId, async () => {
+        stopPoll();
         const job = await getJob(jobId);
         setLeads([...job.leads]);
         setStats(job.stats);
@@ -99,97 +129,128 @@ export default function Home() {
         setVerifying(false);
       });
     } catch (e) {
+      stopPoll();
       setVerifying(false);
       setStatus("error");
       setError(e instanceof Error ? e.message : "Fehler bei der Verifizierung");
     }
   }, [jobId, listen]);
 
-  useEffect(() => () => esRef.current?.close(), []);
+  useEffect(
+    () => () => {
+      esRef.current?.close();
+      stopPoll();
+    },
+    [],
+  );
 
   const running = status === "running";
   const hasLeads = leads.length > 0;
-  const ohneWebsite = stats.ohne_website ?? null;
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8">
-      <header className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">
-          Lead<span className="text-brand">Finder</span>
-        </h1>
-        <p className="mt-1 text-slate-400">
-          Finde KMUs <span className="text-slate-200">ohne eigene Website</span> – inkl. Telefon,
-          Karte und CSV-Export. Datenquelle: OpenStreetMap (kostenlos).
-        </p>
-      </header>
-
-      <SearchForm onSearch={handleSearch} disabled={running} />
-
-      {running && (
-        <div className="mt-6">
-          <ProgressBar current={prog.current} total={prog.total} phase={phase} />
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-6 rounded-2xl border border-red-900 bg-red-950/40 p-4 text-sm text-red-300">
-          ⚠️ {error}
-        </div>
-      )}
-
-      {hasLeads && (
-        <>
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="KMUs gefunden" value={leads.length} accent="text-brand" />
-            <StatCard label="mit E-Mail" value={stats.mit_email ?? leads.filter((l) => l.email).length} />
-            <StatCard
-              label="ohne Website (geprüft)"
-              value={ohneWebsite ?? "–"}
-              accent="text-emerald-400"
-            />
-            <StatCard label="hat Website (geprüft)" value={stats.mit_website ?? "–"} accent="text-red-400" />
+    <div className="min-h-screen">
+      {/* Navbar */}
+      <nav className="sticky top-0 z-20 border-b border-white/5 bg-slate-950/70 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+          <div className="text-lg font-bold tracking-tight">
+            Lead<span className="text-gradient">Finder</span>
           </div>
+          <span className="hidden rounded-full glass px-3 py-1 text-xs text-slate-300 sm:block">
+            🌍 Daten: OpenStreetMap · kostenlos
+          </span>
+        </div>
+      </nav>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              onClick={handleVerify}
-              disabled={running || verifying}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-brand disabled:opacity-50"
-            >
-              🔍 Fehltreffer prüfen
-            </button>
+      <main className="mx-auto max-w-7xl px-4">
+        {/* Hero */}
+        <section className="grid items-center gap-10 py-10 lg:grid-cols-2 lg:py-14">
+          <div className="animate-fadeUp">
+            <span className="inline-flex items-center gap-2 rounded-full glass px-3 py-1 text-xs text-slate-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Lead-Generierung für Web-Entwickler
+            </span>
+            <h1 className="mt-4 text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl">
+              Finde Betriebe <span className="text-gradient">ohne Website</span>
+            </h1>
+            <p className="mt-4 max-w-md text-slate-400">
+              KMUs in deiner Stadt oder Region – inklusive Telefonnummer, Karte,
+              Fehltreffer-Verifizierung und CSV-Export. Komplett kostenlos.
+            </p>
 
-            <a
-              href={jobId ? exportUrl(jobId, onlyNoWeb) : "#"}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
-            >
-              ⬇️ CSV exportieren
-            </a>
-            <label className="flex items-center gap-2 text-sm text-slate-400">
-              <input
-                type="checkbox"
-                checked={onlyNoWeb}
-                onChange={(e) => setOnlyNoWeb(e.target.checked)}
-                className="accent-brand"
-              />
-              nur „ohne Website“ exportieren
-            </label>
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <ResultsTable leads={leads} />
-            <div className="h-[70vh] overflow-hidden rounded-2xl border border-slate-800">
-              <LeadMap leads={leads} />
+            <div className="mt-6">
+              <SearchForm onSearch={handleSearch} disabled={running} />
             </div>
+            <SavedSearches
+              items={saved}
+              onRun={(s) => handleSearch(s, s.label)}
+              onRemove={(label) => setSaved(removeSearch(label))}
+            />
           </div>
-        </>
-      )}
 
-      {!hasLeads && !running && !error && (
-        <p className="mt-10 text-center text-slate-500">
-          Stadt &amp; Branche wählen und „Leads finden“ klicken.
+          <div className="animate-float">
+            <Globe />
+          </div>
+        </section>
+
+        {/* Ergebnisse */}
+        <section id="ergebnisse" className="scroll-mt-20 pb-20">
+          {running && (
+            <div className="mb-4">
+              <ProgressBar current={prog.current} total={prog.total} phase={phase} />
+            </div>
+          )}
+
+          {error && (
+            <div className="glass mb-4 rounded-2xl border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300">
+              ⚠️ {error}
+            </div>
+          )}
+
+          {hasLeads && (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatCard label="KMUs gefunden" value={leads.length} accent="text-indigo-300" icon="🏢" />
+                <StatCard label="mit E-Mail" value={stats.mit_email ?? leads.filter((l) => l.email).length} icon="✉️" />
+                <StatCard label="ohne Website (geprüft)" value={stats.ohne_website ?? "–"} accent="text-emerald-400" icon="✅" />
+                <StatCard label="hat Website (geprüft)" value={stats.mit_website ?? "–"} accent="text-red-400" icon="🌐" />
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button onClick={handleVerify} disabled={running} className="glass rounded-xl px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-indigo-400/50 disabled:opacity-50">
+                  {verifying ? "🔍 Prüfe …" : "🔍 Fehltreffer prüfen"}
+                </button>
+                <a href={jobId ? exportUrl(jobId, onlyNoWeb) : "#"} className="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:brightness-110">
+                  ⬇️ CSV exportieren
+                </a>
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-400">
+                  <input type="checkbox" checked={onlyNoWeb} onChange={(e) => setOnlyNoWeb(e.target.checked)} className="h-4 w-4 accent-indigo-500" />
+                  nur „ohne Website“
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <ResultsTable leads={leads} />
+                <div className="h-[420px] overflow-hidden rounded-2xl border border-white/10 lg:h-[68vh]">
+                  <LeadMap leads={leads} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {!hasLeads && !running && !error && (
+            <p className="py-10 text-center text-slate-500">
+              Stadt &amp; Branche wählen und „Leads finden“ klicken – die Ergebnisse erscheinen hier.
+            </p>
+          )}
+        </section>
+      </main>
+
+      <footer className="border-t border-white/5 py-8 text-center text-xs text-slate-500">
+        <p>
+          Nur für legale Zwecke. Beim Kontaktieren UWG §7 &amp; DSGVO beachten
+          (Telefon-Akquise B2B meist ok, Kalt-E-Mails heikel).
         </p>
-      )}
-    </main>
+        <p className="mt-1">Datenquelle: © OpenStreetMap-Mitwirkende · Verifizierung via DuckDuckGo</p>
+      </footer>
+    </div>
   );
 }

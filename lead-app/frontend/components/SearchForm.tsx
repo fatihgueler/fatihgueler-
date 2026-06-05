@@ -21,7 +21,7 @@ export default function SearchForm({
   onSearch,
   disabled,
 }: {
-  onSearch: (p: SearchParams) => void;
+  onSearch: (p: SearchParams, label: string) => void;
   disabled: boolean;
 }) {
   const [stadt, setStadt] = useState("Hannover");
@@ -31,65 +31,59 @@ export default function SearchForm({
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    onSearch({
-      stadt: stadt.trim() || "Hannover",
-      level: region ? "6" : "8",
-      kategorien: PRESETS[preset],
-      nur_mit_telefon: nurTel,
-    });
+    const ort = stadt.trim() || "Hannover";
+    onSearch(
+      { stadt: ort, level: region ? "6" : "8", kategorien: PRESETS[preset], nur_mit_telefon: nurTel },
+      `${ort}${region ? " · Umland" : ""} · ${preset}`,
+    );
   }
 
   return (
-    <form
-      onSubmit={submit}
-      className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 sm:grid-cols-2 lg:grid-cols-4"
-    >
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-slate-400">Stadt / Gebiet</label>
-        <input
-          value={stadt}
-          onChange={(e) => setStadt(e.target.value)}
-          placeholder="z. B. Hannover"
-          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-brand"
-        />
+    <form onSubmit={submit} className="glass-strong rounded-2xl p-4 sm:p-5">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-slate-400">Stadt / Gebiet</label>
+          <input
+            value={stadt}
+            onChange={(e) => setStadt(e.target.value)}
+            placeholder="z. B. Hannover"
+            className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-slate-400">Branche</label>
+          <select
+            value={preset}
+            onChange={(e) => setPreset(e.target.value)}
+            className="rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30"
+          >
+            {Object.keys(PRESETS).map((k) => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-slate-400">Branche</label>
-        <select
-          value={preset}
-          onChange={(e) => setPreset(e.target.value)}
-          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-brand"
-        >
-          {Object.keys(PRESETS).map((k) => (
-            <option key={k} value={k}>{k}</option>
-          ))}
-        </select>
-      </div>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-4">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={region} onChange={(e) => setRegion(e.target.checked)} className="h-4 w-4 accent-indigo-500" />
+            Umland (Region)
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={nurTel} onChange={(e) => setNurTel(e.target.checked)} className="h-4 w-4 accent-indigo-500" />
+            nur mit Telefon
+          </label>
+        </div>
 
-      <div className="flex flex-col justify-center gap-2 pt-2">
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={region} onChange={(e) => setRegion(e.target.checked)} className="accent-brand" />
-          Umland einbeziehen (Region)
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={nurTel} onChange={(e) => setNurTel(e.target.checked)} className="accent-brand" />
-          nur mit Telefonnummer
-        </label>
-      </div>
-
-      <div className="flex items-end">
-        <button
-          type="submit"
-          disabled={disabled}
-          className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {disabled ? "Suche läuft …" : "Leads finden"}
+        <button type="submit" disabled={disabled} className="btn-primary w-full sm:w-auto">
+          {disabled ? "Suche läuft …" : "✨ Leads finden"}
         </button>
       </div>
 
       {region && (
-        <p className="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">
+        <p className="mt-3 text-xs text-slate-500">
           Tipp: Für das Umland den OSM-Regionsnamen eingeben, z. B.{" "}
           <span className="text-slate-300">„Region Hannover&quot;</span>.
         </p>
