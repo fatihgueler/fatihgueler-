@@ -8,8 +8,8 @@ import StatCard from "@/components/StatCard";
 import ResultsTable from "@/components/ResultsTable";
 import SavedSearches from "@/components/SavedSearches";
 import AuthModal from "@/components/AuthModal";
-import { Lead, SearchChip, SearchParams } from "@/lib/types";
-import { exportUrl, getJob, startSearch, startVerify, streamUrl } from "@/lib/api";
+import { Job, Lead, SearchChip, SearchParams } from "@/lib/types";
+import { exportUrl, getJob, startSearch, startVerify } from "@/lib/api";
 import { clearToken, me } from "@/lib/auth";
 import { createSearch, deleteSearch, listSearches } from "@/lib/searches";
 import { loadSearches, removeSearch, saveSearch } from "@/lib/storage";
@@ -38,10 +38,8 @@ export default function Home() {
   const [saved, setSaved] = useState<SearchChip[]>([]);
   const [user, setUser] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Auth + gespeicherte Suchen laden
   useEffect(() => {
     (async () => {
       const u = await me();
@@ -61,30 +59,29 @@ export default function Home() {
     }
   };
 
-  const listen = useCallback((id: string, onDone: () => void) => {
-    esRef.current?.close();
-    const es = new EventSource(streamUrl(id));
-    esRef.current = es;
-    es.onmessage = (ev) => {
-      const d = JSON.parse(ev.data);
-      setPhase(d.phase);
-      setProg({ current: d.current, total: d.total });
-      setStats(d.stats || {});
-      if (d.status === "done" || d.status === "error") {
-        es.close();
-        esRef.current = null;
-        if (d.status === "error") {
-          setStatus("error");
-          setError(d.phase || "Unbekannter Fehler");
-        } else {
-          onDone();
-        }
+  // Robustes Polling statt SSE: übersteht lange Jobs (100–150 s) hinter Proxys
+  const track = useCallback((id: string, onDone: (job: Job) => void) => {
+    stopPoll();
+    pollRef.current = setInterval(async () => {
+      let job: Job;
+      try {
+        job = await getJob(id);
+      } catch {
+        return; // vorübergehender Netzfehler → weiter pollen
       }
-    };
-    es.onerror = () => {
-      es.close();
-      esRef.current = null;
-    };
+      setPhase(job.phase);
+      setProg({ current: job.current, total: job.total });
+      setStats(job.stats || {});
+      if (job.leads && job.leads.length) setLeads([...job.leads]); // live (v. a. beim Verifizieren)
+      if (job.status === "done") {
+        stopPoll();
+        onDone(job);
+      } else if (job.status === "error") {
+        stopPoll();
+        setStatus("error");
+        setError(job.phase || job.error || "Unbekannter Fehler");
+      }
+    }, 2000);
   }, []);
 
   async function persistSearch(chip: SearchChip) {
@@ -102,14 +99,13 @@ export default function Home() {
     setStats({});
     setVerifying(false);
     setStatus("running");
-    setPhase("Starte …");
+    setPhase("Starte … (große Städte dauern 1–2 Min)");
     setProg({ current: 0, total: 0 });
     document.getElementById("ergebnisse")?.scrollIntoView({ behavior: "smooth" });
     try {
       const id = await startSearch(p);
       setJobId(id);
-      listen(id, async () => {
-        const job = await getJob(id);
+      track(id, (job) => {
         setLeads(job.leads);
         setStats(job.stats);
         setPhase(job.phase);
@@ -130,18 +126,7 @@ export default function Home() {
     setStats({});
     try {
       await startVerify(jobId);
-      stopPoll();
-      pollRef.current = setInterval(async () => {
-        try {
-          const job = await getJob(jobId);
-          setLeads([...job.leads]);
-        } catch {
-          /* ignore */
-        }
-      }, 2500);
-      listen(jobId, async () => {
-        stopPoll();
-        const job = await getJob(jobId);
+      track(jobId, (job) => {
         setLeads([...job.leads]);
         setStats(job.stats);
         setPhase(job.phase);
@@ -149,7 +134,6 @@ export default function Home() {
         setVerifying(false);
       });
     } catch (e) {
-      stopPoll();
       setVerifying(false);
       setStatus("error");
       setError(e instanceof Error ? e.message : "Fehler bei der Verifizierung");
@@ -176,10 +160,7 @@ export default function Home() {
     setSaved(loadSearches());
   }
 
-  useEffect(() => () => {
-    esRef.current?.close();
-    stopPoll();
-  }, []);
+  useEffect(() => () => stopPoll(), []);
 
   const running = status === "running";
   const hasLeads = leads.length > 0;

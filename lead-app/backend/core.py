@@ -17,7 +17,8 @@ from urllib.parse import quote
 
 from scrapling.fetchers import Fetcher
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_PRIMARY = "https://overpass-api.de/api/interpreter"
+OVERPASS_FALLBACK = "https://overpass.kumi.systems/api/interpreter"
 
 # Standard-Branchen (KMUs). Frontend kann eine eigene Auswahl schicken.
 DEFAULT_FILTER = [
@@ -128,25 +129,34 @@ def baue_query(filters, stadt, level):
     )
 
 
-def hole_daten(query, versuche=4):
-    wartezeit = 3
-    for versuch in range(1, versuche + 1):
+def hole_daten(query, versuche=6):
+    """Ruft Overpass ab – geduldig, mit Backoff und einem Fallback-Server.
+
+    Der öffentliche Overpass-Server lehnt große Abfragen bei Auslastung
+    zeitweise ab (429). Mehrere Versuche mit wachsender Pause fangen das ab;
+    der letzte Versuch nutzt einen alternativen Server.
+    """
+    wartezeit = 5
+    for i in range(versuche):
+        letzter = i == versuche - 1
+        url = OVERPASS_FALLBACK if letzter else OVERPASS_PRIMARY
+        timeout = 60 if letzter else 150
         try:
             antwort = Fetcher.get(
-                OVERPASS_URL, params={"data": query},
-                timeout=180, retries=1, stealthy_headers=True,
+                url, params={"data": query},
+                timeout=timeout, retries=1, stealthy_headers=True,
             )
+            if antwort is not None and antwort.status == 200:
+                try:
+                    return antwort.json().get("elements", [])
+                except Exception:
+                    pass  # 200, aber kein JSON (z. B. Auslastungs-Hinweis)
         except Exception:
-            antwort = None
-        if antwort is not None and antwort.status == 200:
-            try:
-                return antwort.json().get("elements", [])
-            except Exception:
-                pass
-        if versuch < versuche:
+            pass
+        if not letzter:
             time.sleep(wartezeit)
-            wartezeit *= 2
-    raise RuntimeError("Overpass-API war nicht erreichbar (evtl. überlastet, später erneut).")
+            wartezeit = min(wartezeit * 2, 45)
+    raise RuntimeError("Overpass-API ist gerade überlastet. Bitte in 1–2 Minuten erneut versuchen.")
 
 
 def _adresse(t):
