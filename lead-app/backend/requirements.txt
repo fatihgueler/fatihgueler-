@@ -6,3 +6,4 @@ anthropic
 sqlmodel
 bcrypt
 pyjwt
+psycopg2-binary

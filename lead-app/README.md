@@ -92,12 +92,22 @@ Die Kernlogik liegt in `backend/core.py` (dieselbe, die auch die CLI-Skripte in
 
 ---
 
-## 🗺️ Deployment (später)
+## 🚀 Deployment
 
-- **Frontend:** statisch/SSR z. B. auf **Vercel** (Env `NEXT_PUBLIC_API_URL` aufs
-  öffentliche Backend setzen).
-- **Backend:** als **Docker**-Container auf einem kleinen Server/VPS (FastAPI +
-  Uvicorn). Scrapling braucht einen Browser → `scrapling install` im Image.
+Schritt-für-Schritt-Anleitung für **Railway (Backend) + Vercel (Frontend)**:
+siehe **[DEPLOY.md](./DEPLOY.md)**. Configs (`backend/Dockerfile`, Postgres- &
+CORS-Env) liegen bereits im Repo.
+
+## 🔐 Benutzerkonten
+
+Login/Registrierung (JWT) + gespeicherte Suchen pro Nutzer (SQLite lokal,
+PostgreSQL in Produktion). Relevante Env-Variablen:
+
+| Variable | Zweck | Default |
+|---|---|---|
+| `JWT_SECRET` | Signatur der Login-Tokens | Dev-Wert (in Prod setzen!) |
+| `DATABASE_URL` | Datenbank | `sqlite:///./leadfinder.db` |
+| `CORS_ORIGINS` | erlaubte Frontend-Domains (kommagetrennt) | `*` |
 
 ---
 

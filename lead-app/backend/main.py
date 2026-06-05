@@ -52,9 +52,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Lead-Finder API", version="2.0", lifespan=lifespan)
 
+# Erlaubte Frontend-Domains: in Produktion via CORS_ORIGINS setzen
+# (z. B. "https://deine-app.vercel.app"), sonst alle erlaubt.
+import os  # noqa: E402
+
+_origins = os.getenv("CORS_ORIGINS", "*")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _origins.split(",")] if _origins != "*" else ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
