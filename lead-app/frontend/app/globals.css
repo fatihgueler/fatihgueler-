@@ -56,6 +56,15 @@ body {
   background: rgba(148, 163, 184, 0.4);
 }
 
+@keyframes globeSpin {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,66 +1,72 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import createGlobe from "cobe";
+// 3D-Globus aus reinem CSS (3D-Transforms) – rendert überall sichtbar,
+// ohne WebGL. Rotierendes Drahtgitter über einer leuchtenden Kugel.
 
-/**
- * Rotierender 3D-Globus (WebGL via cobe) mit Standort-Markern.
- * Leichtgewichtig und ohne schwere 3D-Frameworks – läuft auch mobil flüssig.
- */
+const MERIDIANS = [0, 30, 60, 90, 120, 150];
+const MARKERS = [
+  { top: "30%", left: "45%" },
+  { top: "45%", left: "61%" },
+  { top: "58%", left: "39%" },
+  { top: "39%", left: "31%" },
+];
+
 export default function Globe() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    let phi = 0;
-    let width = 0;
-    const onResize = () => {
-      if (canvasRef.current) width = canvasRef.current.offsetWidth;
-    };
-    window.addEventListener("resize", onResize);
-    onResize();
-
-    const globe = createGlobe(canvasRef.current!, {
-      devicePixelRatio: 2,
-      width: width * 2,
-      height: width * 2,
-      phi: 0,
-      theta: 0.28,
-      dark: 1,
-      diffuse: 1.2,
-      mapSamples: 16000,
-      mapBrightness: 6,
-      baseColor: [0.28, 0.3, 0.55],
-      markerColor: [0.06, 0.85, 0.55],
-      glowColor: [0.25, 0.3, 0.7],
-      markers: [
-        { location: [52.3759, 9.732], size: 0.1 }, // Hannover
-        { location: [52.52, 13.405], size: 0.05 }, // Berlin
-        { location: [48.137, 11.575], size: 0.05 }, // München
-        { location: [50.937, 6.96], size: 0.05 }, // Köln
-        { location: [53.551, 9.993], size: 0.05 }, // Hamburg
-      ],
-      onRender: (state) => {
-        state.phi = phi;
-        phi += 0.005;
-        state.width = width * 2;
-        state.height = width * 2;
-      },
-    });
-
-    return () => {
-      globe.destroy();
-      window.removeEventListener("resize", onResize);
-    };
-  }, []);
-
   return (
-    <div className="relative mx-auto aspect-square w-full max-w-[420px]">
-      <div className="absolute inset-0 animate-glow rounded-full bg-indigo-500/20 blur-3xl" />
-      <canvas
-        ref={canvasRef}
-        className="relative h-full w-full"
-        style={{ contain: "layout paint size" }}
+    <div
+      className="relative mx-auto aspect-square w-full max-w-[440px]"
+      style={{ perspective: "1100px" }}
+    >
+      {/* weicher Glow */}
+      <div className="absolute inset-[5%] animate-glow rounded-full bg-indigo-500/30 blur-3xl" />
+
+      {/* solider, schattierter Kern */}
+      <div
+        className="absolute inset-[14%] rounded-full"
+        style={{
+          background:
+            "radial-gradient(circle at 34% 28%, #a5b4fc 0%, #6366f1 38%, #312e81 70%, #14122e 100%)",
+          boxShadow:
+            "inset -18px -22px 55px rgba(0,0,0,0.55), inset 10px 10px 30px rgba(199,210,254,0.25), 0 0 70px rgba(99,102,241,0.35)",
+        }}
       />
+
+      {/* rotierendes Drahtgitter (echtes CSS-3D) */}
+      <div
+        className="absolute inset-[14%]"
+        style={{ transformStyle: "preserve-3d", animation: "globeSpin 18s linear infinite" }}
+      >
+        {MERIDIANS.map((deg) => (
+          <div
+            key={deg}
+            className="absolute inset-0 rounded-full border border-indigo-200/25"
+            style={{ transform: `rotateY(${deg}deg)` }}
+          />
+        ))}
+        <div
+          className="absolute inset-0 rounded-full border border-emerald-300/30"
+          style={{ transform: "rotateX(90deg)" }}
+        />
+        <div
+          className="absolute inset-0 rounded-full border border-indigo-200/15"
+          style={{ transform: "rotateX(65deg)" }}
+        />
+        <div
+          className="absolute inset-0 rounded-full border border-indigo-200/15"
+          style={{ transform: "rotateX(115deg)" }}
+        />
+      </div>
+
+      {/* Glanzlicht oben links */}
+      <div className="absolute left-[26%] top-[22%] h-[14%] w-[14%] rounded-full bg-white/50 blur-md" />
+
+      {/* leuchtende Standort-Marker */}
+      {MARKERS.map((m, i) => (
+        <span key={i} className="absolute" style={{ top: m.top, left: m.left }}>
+          <span className="absolute -inset-2 animate-ping rounded-full bg-emerald-400/40" />
+          <span className="block h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_2px_rgba(16,185,129,0.7)]" />
+        </span>
+      ))}
     </div>
   );
 }
