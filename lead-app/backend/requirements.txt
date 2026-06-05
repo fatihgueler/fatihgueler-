@@ -3,3 +3,6 @@ uvicorn[standard]
 scrapling[fetchers]
 python-dotenv
 anthropic
+sqlmodel
+bcrypt
+pyjwt

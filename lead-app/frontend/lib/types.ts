@@ -30,3 +30,10 @@ export interface SearchParams {
   kategorien: string[] | null;
   nur_mit_telefon: boolean;
 }
+
+/** Gespeicherte Suche (Chip) – lokal (localStorage) oder serverseitig (mit id). */
+export interface SearchChip extends SearchParams {
+  label: string;
+  count?: number;
+  id?: string;
+}

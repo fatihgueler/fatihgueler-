@@ -4,6 +4,10 @@ backend/__pycache__/
 *.pyc
 backend/.env
 
+# Datenbank (lokale Nutzerdaten – nicht committen)
+*.db
+*.sqlite3
+
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/

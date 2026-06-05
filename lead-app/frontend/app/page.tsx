@@ -7,15 +7,16 @@ import ProgressBar from "@/components/ProgressBar";
 import StatCard from "@/components/StatCard";
 import ResultsTable from "@/components/ResultsTable";
 import SavedSearches from "@/components/SavedSearches";
-import { Lead, SearchParams } from "@/lib/types";
+import AuthModal from "@/components/AuthModal";
+import { Lead, SearchChip, SearchParams } from "@/lib/types";
 import { exportUrl, getJob, startSearch, startVerify, streamUrl } from "@/lib/api";
-import { loadSearches, removeSearch, saveSearch, SavedSearch } from "@/lib/storage";
+import { clearToken, me } from "@/lib/auth";
+import { createSearch, deleteSearch, listSearches } from "@/lib/searches";
+import { loadSearches, removeSearch, saveSearch } from "@/lib/storage";
 
 const Globe = dynamic(() => import("@/components/Globe"), {
   ssr: false,
-  loading: () => (
-    <div className="mx-auto aspect-square w-full max-w-[420px] animate-pulse rounded-full bg-indigo-500/10" />
-  ),
+  loading: () => <div className="mx-auto aspect-square w-full max-w-[440px] animate-pulse rounded-full bg-indigo-500/10" />,
 });
 const LeadMap = dynamic(() => import("@/components/LeadMap"), {
   ssr: false,
@@ -34,11 +35,24 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [onlyNoWeb, setOnlyNoWeb] = useState(false);
-  const [saved, setSaved] = useState<SavedSearch[]>([]);
+  const [saved, setSaved] = useState<SearchChip[]>([]);
+  const [user, setUser] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => setSaved(loadSearches()), []);
+  // Auth + gespeicherte Suchen laden
+  useEffect(() => {
+    (async () => {
+      const u = await me();
+      if (u) {
+        setUser(u.email);
+        setSaved(await listSearches());
+      } else {
+        setSaved(loadSearches());
+      }
+    })();
+  }, []);
 
   const stopPoll = () => {
     if (pollRef.current) {
@@ -73,36 +87,42 @@ export default function Home() {
     };
   }, []);
 
-  const handleSearch = useCallback(
-    async (p: SearchParams, label: string) => {
-      setError(null);
-      setLeads([]);
-      setStats({});
-      setVerifying(false);
-      setStatus("running");
-      setPhase("Starte …");
-      setProg({ current: 0, total: 0 });
-      document.getElementById("ergebnisse")?.scrollIntoView({ behavior: "smooth" });
-      try {
-        const id = await startSearch(p);
-        setJobId(id);
-        listen(id, async () => {
-          const job = await getJob(id);
-          setLeads(job.leads);
-          setStats(job.stats);
-          setPhase(job.phase);
-          setStatus("done");
-          setSaved(saveSearch({ ...p, label, ts: Date.now(), count: job.leads.length }));
-        });
-      } catch (e) {
-        setStatus("error");
-        setError(e instanceof Error ? e.message : "Fehler beim Start");
-      }
-    },
-    [listen],
-  );
+  async function persistSearch(chip: SearchChip) {
+    if (user) {
+      await createSearch(chip);
+      setSaved(await listSearches());
+    } else {
+      setSaved(saveSearch({ ...chip, ts: Date.now() }));
+    }
+  }
 
-  const handleVerify = useCallback(async () => {
+  async function handleSearch(p: SearchParams, label: string) {
+    setError(null);
+    setLeads([]);
+    setStats({});
+    setVerifying(false);
+    setStatus("running");
+    setPhase("Starte …");
+    setProg({ current: 0, total: 0 });
+    document.getElementById("ergebnisse")?.scrollIntoView({ behavior: "smooth" });
+    try {
+      const id = await startSearch(p);
+      setJobId(id);
+      listen(id, async () => {
+        const job = await getJob(id);
+        setLeads(job.leads);
+        setStats(job.stats);
+        setPhase(job.phase);
+        setStatus("done");
+        persistSearch({ ...p, label, count: job.leads.length });
+      });
+    } catch (e) {
+      setStatus("error");
+      setError(e instanceof Error ? e.message : "Fehler beim Start");
+    }
+  }
+
+  async function handleVerify() {
     if (!jobId) return;
     setError(null);
     setVerifying(true);
@@ -114,7 +134,7 @@ export default function Home() {
       pollRef.current = setInterval(async () => {
         try {
           const job = await getJob(jobId);
-          setLeads([...job.leads]); // Badges + Karte live aktualisieren
+          setLeads([...job.leads]);
         } catch {
           /* ignore */
         }
@@ -134,15 +154,32 @@ export default function Home() {
       setStatus("error");
       setError(e instanceof Error ? e.message : "Fehler bei der Verifizierung");
     }
-  }, [jobId, listen]);
+  }
 
-  useEffect(
-    () => () => {
-      esRef.current?.close();
-      stopPoll();
-    },
-    [],
-  );
+  async function handleRemoveSaved(s: SearchChip) {
+    if (user && s.id) {
+      await deleteSearch(s.id);
+      setSaved(await listSearches());
+    } else {
+      setSaved(removeSearch(s.label));
+    }
+  }
+
+  async function handleAuth(email: string) {
+    setUser(email);
+    setSaved(await listSearches());
+  }
+
+  function handleLogout() {
+    clearToken();
+    setUser(null);
+    setSaved(loadSearches());
+  }
+
+  useEffect(() => () => {
+    esRef.current?.close();
+    stopPoll();
+  }, []);
 
   const running = status === "running";
   const hasLeads = leads.length > 0;
@@ -155,9 +192,20 @@ export default function Home() {
           <div className="text-lg font-bold tracking-tight">
             Lead<span className="text-gradient">Finder</span>
           </div>
-          <span className="hidden rounded-full glass px-3 py-1 text-xs text-slate-300 sm:block">
-            🌍 Daten: OpenStreetMap · kostenlos
-          </span>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <span className="hidden text-sm text-slate-300 sm:block">👤 {user}</span>
+                <button onClick={handleLogout} className="glass rounded-lg px-3 py-1.5 text-sm text-slate-200 transition hover:border-red-400/40">
+                  Logout
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setAuthOpen(true)} className="btn-primary px-4 py-1.5">
+                Login / Registrieren
+              </button>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -181,8 +229,9 @@ export default function Home() {
             </div>
             <SavedSearches
               items={saved}
+              cloud={!!user}
               onRun={(s) => handleSearch(s, s.label)}
-              onRemove={(label) => setSaved(removeSearch(label))}
+              onRemove={handleRemoveSaved}
             />
           </div>
 
@@ -200,9 +249,7 @@ export default function Home() {
           )}
 
           {error && (
-            <div className="glass mb-4 rounded-2xl border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300">
-              ⚠️ {error}
-            </div>
+            <div className="glass mb-4 rounded-2xl border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300">⚠️ {error}</div>
           )}
 
           {hasLeads && (
@@ -245,12 +292,11 @@ export default function Home() {
       </main>
 
       <footer className="border-t border-white/5 py-8 text-center text-xs text-slate-500">
-        <p>
-          Nur für legale Zwecke. Beim Kontaktieren UWG §7 &amp; DSGVO beachten
-          (Telefon-Akquise B2B meist ok, Kalt-E-Mails heikel).
-        </p>
+        <p>Nur für legale Zwecke. Beim Kontaktieren UWG §7 &amp; DSGVO beachten (Telefon-Akquise B2B meist ok, Kalt-E-Mails heikel).</p>
         <p className="mt-1">Datenquelle: © OpenStreetMap-Mitwirkende · Verifizierung via DuckDuckGo</p>
       </footer>
+
+      {authOpen && <AuthModal onClose={() => setAuthOpen(false)} onAuth={handleAuth} />}
     </div>
   );
 }
