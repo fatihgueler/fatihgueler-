@@ -1,0 +1,17 @@
+# Python
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+backend/.env
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+
+# Logs / Sonstiges
+*.log
+.DS_Store
