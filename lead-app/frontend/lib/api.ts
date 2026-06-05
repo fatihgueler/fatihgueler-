@@ -1,7 +1,10 @@
 import { Job, SearchParams } from "./types";
 
-export const API =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Slash(es) am Ende entfernen, damit `${API}/api/...` nie zu `//api/...` wird
+// (doppelter Slash → 404). Robust auch bei NEXT_PUBLIC_API_URL mit „/" am Ende.
+export const API = (
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+).replace(/\/+$/, "");
 
 export async function startSearch(params: SearchParams): Promise<string> {
   const res = await fetch(`${API}/api/search`, {
