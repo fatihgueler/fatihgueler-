@@ -108,12 +108,21 @@ def filter_label(filters):
     return "Gastronomie & Dienstleister"
 
 
+def _level_regex(level):
+    """Welche Admin-Level kommen in Frage?
+    Stadt (8): Stadtstaat(4) / kreisfreie Stadt(6) / Gemeinde(8).
+    Region (6): Landkreis/Region (5|6). So matchen Berlin, Köln, München, Hannover … alle.
+    """
+    return "5|6" if str(level) == "6" else "4|6|8"
+
+
 def baue_query(filters, stadt, level):
     union = "\n".join(_klausel(f) for f in filters)
+    lvl = _level_regex(level)
     return (
         "[out:json][timeout:180];\n"
-        f'area["name"="{stadt}"]["admin_level"="{level}"]'
-        '["boundary"="administrative"]->.a;\n'
+        f'area["name"="{stadt}"]["boundary"="administrative"]'
+        f'["admin_level"~"^({lvl})$"]->.a;\n'
         f"(\n{union}\n);\n"
         "out center tags;"
     )

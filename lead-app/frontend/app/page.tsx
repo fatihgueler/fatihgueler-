@@ -283,7 +283,14 @@ export default function Home() {
             </>
           )}
 
-          {!hasLeads && !running && !error && (
+          {!hasLeads && !running && !error && status === "done" && (
+            <div className="glass rounded-2xl p-6 text-center text-slate-300">
+              Keine Treffer. 🤔 Prüfe den <strong>Stadtnamen</strong> (genau wie in OpenStreetMap, z. B.
+              „München", „Köln", „Region Hannover") oder wähle eine andere Branche.
+            </div>
+          )}
+
+          {!hasLeads && !running && !error && status !== "done" && (
             <p className="py-10 text-center text-slate-500">
               Stadt &amp; Branche wählen und „Leads finden“ klicken – die Ergebnisse erscheinen hier.
             </p>
